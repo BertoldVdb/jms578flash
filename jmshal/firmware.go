@@ -27,11 +27,11 @@ const (
 	memBootWithoutRom uint16 = 0x4154
 )
 
-func (d *JMSHal) CodeWrite(buf []byte, tryVendorFirst bool) error {
+func (d *JMSHal) CodeWrite(buf []byte, useVendorPath bool, useRawLoad bool) error {
 	/* Vendor path corrupts 0x0000-0x0400 before overwriting it with valid data,
 	 * as such you need to use raw writing with tryVendorFirst=false if there
 	 * is already something running. */
-	if tryVendorFirst {
+	if useVendorPath {
 		fwImage := image.Build(buf, nil, true)
 
 		var cmdBuf [10]byte
@@ -42,26 +42,32 @@ func (d *JMSHal) CodeWrite(buf []byte, tryVendorFirst bool) error {
 
 		if err := d.dev.Write(cmdBuf[:], fwImage); err == nil {
 			return d.reopen()
+		} else if !useRawLoad {
+			return err
 		}
 	}
 
-	if len(buf) > 0x4000 {
-		return errors.New("code is too long for raw writing")
+	if useRawLoad {
+		if len(buf) > 0x4000 {
+			return errors.New("code is too long for raw writing")
+		}
+
+		if err := d.XDATAWriteByte(regMapping8000, 6); err != nil {
+			return err
+		}
+
+		if _, err := d.XDATAWrite(0x8000, buf); err != nil {
+			return err
+		}
+
+		if _, err := d.XDATAWrite(memBootWithoutRom, []byte{'i', 's'}); err != nil {
+			return err
+		}
+
+		return d.reopen()
 	}
 
-	if err := d.XDATAWriteByte(regMapping8000, 6); err != nil {
-		return err
-	}
-
-	if _, err := d.XDATAWrite(0x8000, buf); err != nil {
-		return err
-	}
-
-	if _, err := d.XDATAWrite(memBootWithoutRom, []byte{'i', 's'}); err != nil {
-		return err
-	}
-
-	return d.reopen()
+	return errors.New("failed to start code, no working method")
 }
 
 func (d *JMSHal) codeRead(offset uint16, buf []byte) (int, error) {

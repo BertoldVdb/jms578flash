@@ -1,6 +1,7 @@
 package jmshal
 
 import (
+	"github.com/BertoldVdb/jms578flash/jmsmods"
 	"github.com/BertoldVdb/jms578flash/scsi"
 )
 
@@ -9,15 +10,25 @@ type JMSHal struct {
 
 	hooks       []uint16
 	hookVersion string
+
+	unsafe bool
+
+	LogFunc func(format string, params ...any)
 }
 
-func New(dev *scsi.SCSI) (*JMSHal, error) {
+func (j *JMSHal) log(format string, params ...any) {
+	if j.LogFunc != nil {
+		j.LogFunc(format, params...)
+	}
+}
+
+func New(dev *scsi.SCSI, unsafe bool) (*JMSHal, error) {
 	d := &JMSHal{
-		dev: dev,
+		dev:    dev,
+		unsafe: unsafe,
 	}
 
-	err := d.hookUpdateAvailable()
-	if err != nil {
+	if err := d.hookUpdateAvailable(); err != nil {
 		return nil, err
 	}
 
@@ -46,7 +57,9 @@ func (d *JMSHal) ResetChip() error {
 	}
 
 	/* As a last resort, try to run the reset function as firmware... */
-	d.CodeWrite(hookBinaryReset[5:], true)
+	if err := d.CodeWrite(jmsmods.HookBinaryReset[5:], true, true); err != nil {
+		return err
+	}
 
 	return d.reopen()
 }

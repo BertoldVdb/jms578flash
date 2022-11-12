@@ -2,158 +2,127 @@ package main
 
 import (
 	"flag"
-	"io/ioutil"
 	"log"
 	"os"
-	"time"
+	"strings"
 
 	"github.com/BertoldVdb/jms578flash/jmshal"
+	"github.com/BertoldVdb/jms578flash/jmsmods"
 	"github.com/BertoldVdb/jms578flash/scsi"
-	"github.com/BertoldVdb/jms578flash/spiflash"
 )
 
-func main() {
-	bl := flag.Bool("bl", false, "Go to bootloader")
-	dev := flag.String("dev", "/dev/sdb", "Device to use")
-	on := flag.Bool("on", false, "Turn on led")
+func readFile(path string) ([]byte, error) {
+	if path == "" {
+		return nil, nil
+	}
 
+	return os.ReadFile(path)
+}
+
+func main() {
+	dev := flag.String("dev", "152d:0000", "Device to use")
+	unsafe := flag.Bool("unsafe", false, "Allow writing to the flash memory")
+	bootrom := flag.String("bootrom", "", "Path to dumped bootrom")
+	firmware := flag.String("firmware", "", "Path to firmare")
+
+	flash := flag.Bool("flash", false, "Flash given firmware to device")
+	extract := flag.Bool("extract", false, "Read current firmware form device")
+	dumprom := flag.Bool("dumprom", false, "Attempt to dump bootrom")
+
+	boot := flag.Bool("boot", true, "Boot new firmware after flashing")
+	dohook := flag.Bool("hook", true, "Attempt to add hooks to loaded firmware")
+	mods := flag.String("mods", "", "Comma separated list of mods to add to the firmare")
 	flag.Parse()
 
-	/*	fw, err := ioutil.ReadFile("../../modfw.bin")
-		if err != nil {
-			log.Fatalln(fw)
-		}
-
-		fw2, err := jmshal.PatchFirmware(fw)
-		if err != nil {
-			log.Fatalln(err, len(fw2))
-		}
-
-		ioutil.WriteFile("/home/bertold/vmshared/test2.bin", fw2, 0644)*/
+	actions := 0
+	if *flash {
+		actions++
+	}
+	if *extract {
+		/* If we want to extract the firmware, flash should not be written, obviously */
+		*unsafe = false
+		actions++
+	}
+	if *dumprom {
+		actions++
+	}
+	if actions != 1 {
+		log.Fatalln("You can only specify one of '-flash','-extract' or '-dumprom'")
+	}
 
 	sdev, err := scsi.New(*dev)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	jms, err := jmshal.New(sdev)
+	jms, err := jmshal.New(sdev, *unsafe)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	jms.XDATAWrite(0x7054, []byte{0xe1})
-	if *on {
-		jms.XDATAWrite(0x7058, []byte{0x10})
-	} else {
-		jms.XDATAWrite(0x7058, []byte{0x00})
+	jms.LogFunc = log.Printf
+
+	if *dumprom {
+		if *bootrom == "" {
+			log.Fatalln("Bootrom filename is missing")
+		}
+
+		log.Println("Trying to dump bootrom to", *bootrom)
+		rom, err := jms.DumpBootrom()
+		if err != nil {
+			log.Fatalln("Dumping bootrom failed:", err)
+		}
+		if err := os.WriteFile(*bootrom, rom, 0644); err != nil {
+			log.Fatalln("Failed to write to file:", err)
+		}
+		log.Println(len(rom), "bytes written to", *bootrom)
+		return
 	}
 
-	return
-	//jms.GoROM()
-
-	//if true {
-	//bootloader, err := ioutil.ReadFile("../../rom_dump.bin")
-
-	//	log.Println("go patched", jms.GoPatched(bootloader))
-	//}
-	//tasks, err := jmstasks.New(jms)
-	//if err != nil {
-	//	log.Fatalln(err)
-	//}
-	//log.Println(tasks)
-
-	//flashfw, err := ioutil.ReadFile("/home/bertold/vmshared/test2.bin")
-	//if err != nil {
-	//log.Fatalln(err)
-	//}
-	//log.Println(jms.FlashWriteFirmware(flashfw))
-	var bootloader []byte
-	if true {
-		therom, err := jms.DumpBootrom()
-		if err != nil {
-			log.Fatalln(err)
-		}
-		ioutil.WriteFile("/tmp/rom_dump.bin", therom, 0644)
-	} else {
-		var err error
-		bootloader, err = ioutil.ReadFile("/tmp/rom_dump.bin")
-		if err != nil {
-			log.Fatalln(err)
-		}
-	}
-
-	fw, err := ioutil.ReadFile("../../modfw.bin")
+	rom, err := readFile(*bootrom)
 	if err != nil {
-		log.Fatalln(fw)
+		log.Fatalln("Failed to load specified bootrom:", err)
 	}
-	log.Println("test", jms.FlashInstallPatchAndBootFW(bootloader, fw))
 
-	os.Exit(1)
+	if *firmware == "" {
+		log.Fatalln("Firmware filename is missing")
+	}
 
-	log.Println(jms.VersionGet())
-
-	/*
-		//log.Println(jms.CallFunction(0x3500, jmshal.CPUContext{DPTR: 1}))
-		hooks, err := jms.HookGetAvailable()
-		if err != nil {
-			log.Fatalln(err)
+	if *extract {
+		if rom != nil {
+			if err := jms.RebootToPatched(rom); err != nil {
+				log.Println("Failed to access patched firmware:", err)
+				log.Fatalln("You may want to remove the bootrom argument.")
+			}
 		}
-		log.Println(hooks)
-		log.Println(jms.HookCall(hooks[2], jmshal.CPUContext{DPTR: 1}))
-	*/
-	//	var buf [1024]byte
-	//	log.Println(jms.CodeRead(0, buf[:]))
-	//	log.Println(hex.EncodeToString(buf[:]))
 
-	jms.XDATAWriteByte(0x714d, 0x2)
-
-	flash, err := spiflash.New(jms.SPI, 512)
-	log.Println(err)
-
-	goToBootloader := func() {
-		//
-		log.Println(flash.ErasePage(0x0000))
-
-		jms.ResetChip()
-
-	}
-
-	writeFw := func() {
-		flashfw, err := ioutil.ReadFile("/home/bertold/vmshared/test2.bin")
+		fw, err := jms.FlashReadFirmware()
 		if err != nil {
-			log.Fatalln(err)
+			log.Fatalln("Failed to read firmware:", err)
 		}
-		start := time.Now()
-		log.Println(flash.EraseChip())
 
-		flash.Write(0x0e00, flashfw[:0x200])
-		flash.Write(0x0000, flashfw[0x200:0x400])
-		flash.Write(0x1000, flashfw[0x400:0xc400])
-		flash.Write(0xd000, flashfw[0xc400:])
-		jms.ResetChip()
-		log.Println(time.Now().Sub(start))
+		if err := os.WriteFile(*firmware, fw, 0644); err != nil {
+			log.Fatalln("Failed to write to file:", err)
+		}
+		log.Println(len(fw), "bytes written to", *firmware)
+		return
 	}
 
-	if *bl {
-		goToBootloader()
-	} else {
-		writeFw()
+	if *flash {
+		fw, err := os.ReadFile(*firmware)
+		if err != nil {
+			log.Fatalln("Failed to read firmware:", err)
+		}
+		var modjms []jmsmods.Mod
+		if len(*mods) > 0 {
+			for _, m := range strings.Split(*mods, ",") {
+				modjms = append(modjms, jmsmods.Mod(m))
+			}
+		}
+
+		if err := jms.FlashPatchWriteAndBootFW(rom, fw, *dohook, modjms, *boot); err != nil {
+			log.Fatalln("Failed to write flash:", err)
+		}
+		log.Println("Flash writing complete")
 	}
-	os.Exit(1)
-
-	/*var page [65536]byte
-	var page2 [65536]byte
-	rand.Read(page[:])
-
-	log.Println(flash.Write(0, page[:]))
-	log.Println(flash.Read(0, page2[:]))
-
-	log.Println("Full time", time.Now().Sub(start), bytes.Equal(page[:], page2[:]))*/
-
-	//out[1] = 0
-	//out[2] = 0
-	//out[3] = 0
-	//	var in [15]byte
-	//	log.Println(jms.SpiHalfDuplex(out[:], in[:]), hex.EncodeToString(in[:]))
-
 }

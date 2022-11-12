@@ -10,10 +10,11 @@ type flashDevice struct {
 
 	blockSize uint32
 	pageSize  uint32
+	chipSize  uint32
 }
 
 var devices = []flashDevice{
-	{deviceID: 0x1f65, name: "Adesto AT25DN512", opcodeChipErase: 0x60, opcodeBlockErase: 0x20, blockSize: 4096, opcodePageErase: 0x81, pageSize: 256},
+	{deviceID: 0x1f65, name: "Adesto AT25DN512", opcodeChipErase: 0x60, opcodeBlockErase: 0x20, blockSize: 4096, opcodePageErase: 0x81, pageSize: 256, chipSize: 64 * 1024},
 }
 
 func rightAlign(in uint32) (uint32, uint32) {

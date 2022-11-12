@@ -20,12 +20,11 @@ func (d *JMSHal) xdataRead(offset uint16, buf []byte) (int, error) {
 	 * but we implement it ourselves to increase reliability */
 	cmdBuf[11] = 0xfd
 
-	err := d.dev.Read(cmdBuf[:], &buf)
-	if err != nil {
+	if err := d.dev.Read(cmdBuf[:], &buf); err != nil {
 		return 0, err
 	}
 
-	return len(buf), err
+	return len(buf), nil
 }
 
 func (d *JMSHal) xdataWrite(offset uint16, buf []byte) (int, error) {
@@ -42,12 +41,11 @@ func (d *JMSHal) xdataWrite(offset uint16, buf []byte) (int, error) {
 
 	cmdBuf[11] = 0xfe
 
-	err := d.dev.Write(cmdBuf[:], buf)
-	if err != nil {
+	if err := d.dev.Write(cmdBuf[:], buf); err != nil {
 		return 0, err
 	}
 
-	return len(buf), err
+	return len(buf), nil
 }
 
 func completeIO(offset uint16, buf []byte, f func(offset uint16, buf []byte) (int, error)) (int, error) {

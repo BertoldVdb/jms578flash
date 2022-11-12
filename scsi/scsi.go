@@ -1,6 +1,7 @@
 package scsi
 
 import (
+	"errors"
 	"fmt"
 	"time"
 	"unsafe"
@@ -66,8 +67,24 @@ func New(path string) (*SCSI, error) {
 }
 
 func (s *SCSI) open() error {
+	path := s.path
+	if vid, pid, ok := isUsbPath(path); ok {
+		devs, err := FindUSBDevices(vid, pid)
+		if err != nil {
+			return err
+		}
+		if len(devs) == 0 {
+			return errors.New("USB device not found")
+		}
+		if len(devs) > 1 {
+			return errors.New("more than one USB device found")
+		}
+
+		path = devs[0]
+	}
+
 	var err error
-	s.fd, err = unix.Open(s.path, unix.O_RDWR, 0600)
+	s.fd, err = unix.Open(path, unix.O_RDWR, 0600)
 
 	return err
 }

@@ -1,4 +1,4 @@
-package jmshal
+package jmsmods
 
 import (
 	"bytes"
@@ -33,7 +33,7 @@ type HookFunc struct {
 var hookBinaryMain []byte
 
 //go:embed asm/reset.bin
-var hookBinaryReset []byte
+var HookBinaryReset []byte
 
 //go:embed asm/spi_rx.bin
 var hookSPIReceive []byte
@@ -42,13 +42,13 @@ var hookSPIReceive []byte
 var hookSPITransmit []byte
 
 var hooks = []HookFunc{
-	{Binary: hookBinaryReset}, // USB disconnect and reset chip
+	{Binary: HookBinaryReset}, // USB disconnect and reset chip
 
 	{Binary: hookSPIReceive},  // SPI DMA Receive
 	{Binary: hookSPITransmit}, // SPI DMA Transmit
 }
 
-const libHookVersion string = "00.00.05" //This 8-byte string must be updated whenever the definitions change incompatibly
+const HookVersion string = "00.00.05" //This 8-byte string must be updated whenever the definitions change incompatibly
 
 func patchInstall(code []byte, codeOffset uint16, hooks []HookFunc) ([]byte, error) {
 	codeCpy := make([]byte, len(code))
@@ -67,7 +67,7 @@ func patchInstall(code []byte, codeOffset uint16, hooks []HookFunc) ([]byte, err
 	patchLoadAddr += 0x20
 
 	patchInfoTable := make([]byte, 8, 128)
-	copy(patchInfoTable, []byte(libHookVersion))
+	copy(patchInfoTable, []byte(HookVersion))
 
 	/* Write the individual functions */
 	for _, m := range hooks {
@@ -131,7 +131,7 @@ func patchInstall(code []byte, codeOffset uint16, hooks []HookFunc) ([]byte, err
 
 var knownROM = []byte{0xb9, 0xdf, 0xa8, 0x5d, 0x37, 0x55, 0x49, 0x2e, 0x76, 0xb8, 0x66, 0x49, 0x2f, 0x93, 0x7a, 0xb0, 0xba, 0x98, 0x38, 0x5b}
 
-func patchBootromForHAL(bootrom []byte) ([]byte, error) {
+func PatchBootromForHAL(bootrom []byte) ([]byte, error) {
 	if len(bootrom) != 0x4000 {
 		return nil, errors.New("bootrom must be 16kB")
 	}
@@ -147,37 +147,9 @@ func patchBootromForHAL(bootrom []byte) ([]byte, error) {
 	return patchInstall(bootrom, 0, hooks)
 }
 
-func (d *JMSHal) PatchIsPresent() bool {
-	return d.hookVersion == libHookVersion
-}
-
-func (d *JMSHal) PatchVersion() (string, string) {
-	return d.hookVersion, libHookVersion
-}
-
-func (d *JMSHal) hookUpdateAvailable() error {
-	var cmdBuf [2]byte
-	cmdBuf[0] = 0xe0
-	cmdBuf[1] = 0x78
-
-	var result [9]byte
-	resultSlice := result[:]
-
-	d.hooks = nil
-	d.hookVersion = ""
-
-	if err := d.dev.Read(cmdBuf[:], &resultSlice); err != nil {
-		return nil
-	}
-
-	hookInfoTableAddr := binary.BigEndian.Uint16(result[:])
-	var hookInfoTable [128]byte
-
-	if _, err := d.CodeRead(hookInfoTableAddr, hookInfoTable[:]); err != nil {
-		return err
-	}
-
+func PatchReadInfo(hookInfoTable [128]byte) ([]uint16, string) {
 	work := hookInfoTable[8:]
+
 	var hookAddrs []uint16
 	for len(work) >= 2 {
 		addr := binary.BigEndian.Uint16(work)
@@ -192,57 +164,12 @@ func (d *JMSHal) hookUpdateAvailable() error {
 	fwHookVersion := string(hookInfoTable[:8])
 
 	if len(hookAddrs) == 0 {
-		return errors.New("invalid hook descriptor received")
+		return nil, ""
 	}
 
-	if fwHookVersion != libHookVersion {
+	if fwHookVersion != HookVersion {
 		hookAddrs = hookAddrs[:1]
 	}
 
-	d.hookVersion = fwHookVersion
-	d.hooks = hookAddrs
-
-	//TODO: Init SPI (do this in a better place)
-	d.CodeCall(0x2c32, CPUContext{})
-
-	return nil
-}
-
-type CPUContext struct {
-	DPTR uint16
-	ACC  uint8
-	R    [8]uint8
-}
-
-func (d *JMSHal) CodeCall(addr uint16, ctx CPUContext) (CPUContext, error) {
-	var cmdBuf [15]byte
-	cmdBuf[0] = 0xe0
-	cmdBuf[1] = 0x77
-
-	binary.LittleEndian.PutUint16(cmdBuf[2:], addr)
-	binary.LittleEndian.PutUint16(cmdBuf[4:], ctx.DPTR)
-	copy(cmdBuf[6:], ctx.R[:])
-	cmdBuf[6+8] = ctx.ACC
-
-	ctx = CPUContext{}
-
-	var result [9]byte
-	resultSlice := result[:]
-
-	if err := d.dev.Read(cmdBuf[:], &resultSlice); err != nil {
-		return ctx, err
-	}
-
-	ctx.ACC = result[0]
-	copy(ctx.R[:], result[1:])
-
-	return ctx, nil
-}
-
-func (d *JMSHal) hookCallIndex(index int, ctx CPUContext) (CPUContext, error) {
-	if len(d.hooks) <= index {
-		return ctx, errors.New("function is not available")
-	}
-
-	return d.CodeCall(d.hooks[index], ctx)
+	return hookAddrs, fwHookVersion
 }

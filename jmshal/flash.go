@@ -3,15 +3,19 @@ package jmshal
 import (
 	"bytes"
 	"errors"
-	"log"
 
 	"github.com/BertoldVdb/jms578flash/image"
+	"github.com/BertoldVdb/jms578flash/jmsmods"
 	"github.com/BertoldVdb/jms578flash/spiflash"
 
 	_ "embed"
 )
 
 func (d *JMSHal) FlashWriteFirmware(fw []byte, verify bool) error {
+	if !d.unsafe {
+		return errors.New("flash write requires unsafeAllow=true")
+	}
+
 	if len(fw) < 0xc400 {
 		return errors.New("firmware file too small")
 	}
@@ -74,8 +78,12 @@ func (d *JMSHal) FlashReadFirmware() ([]byte, error) {
 	return fw, err
 }
 
-func (t *JMSHal) FlashEraseFirmware() error {
-	flash, err := spiflash.New(t.SPI, t.SPIMaxTransactionSize())
+func (d *JMSHal) FlashEraseFirmware() error {
+	if !d.unsafe {
+		return errors.New("flash erase requires unsafeAllow=true")
+	}
+
+	flash, err := spiflash.New(d.SPI, d.SPIMaxTransactionSize())
 	if err != nil {
 		return err
 	}
@@ -106,10 +114,10 @@ func (d *JMSHal) DumpBootrom() ([]byte, error) {
 		return nil, err
 	}
 
-	return rom, d.GoROM()
+	return rom, d.RebootToROM()
 }
 
-func (d *JMSHal) GoROM() error {
+func (d *JMSHal) RebootToROM() error {
 	if err := d.FlashEraseFirmware(); err != nil {
 		return err
 	}
@@ -117,54 +125,47 @@ func (d *JMSHal) GoROM() error {
 	return d.ResetChip()
 }
 
-func (d *JMSHal) GoPatched(bootrom []byte) error {
-	if d.PatchIsPresent() {
+func (d *JMSHal) RebootToPatched(bootrom []byte) error {
+	if d.PatchIsCurrent() {
 		return nil
 	}
 
-	if version, err := d.VersionGet(); err != nil || version != 0 || d.hookVersion != "" {
-		if err := d.GoROM(); err != nil {
-			return err
+	if d.unsafe {
+		if version, err := d.VersionGet(); err != nil || version != 0 || d.hookVersion != "" {
+			if err := d.RebootToROM(); err != nil {
+				return err
+			}
 		}
 	}
 
-	patched, err := patchBootromForHAL(bootrom)
+	patched, err := jmsmods.PatchBootromForHAL(bootrom)
 	if err != nil {
-		log.Fatalln(err)
+		return err
 	}
 
-	return d.CodeWrite(patched, false)
+	/* If we cannot erase the firmware to force ROM mode,
+	   we will try to load the patched bootrom via the firmware update mechanism.
+	   This may fail and the device will crash. */
+	if err := d.CodeWrite(patched, !d.unsafe, d.unsafe); err != nil {
+		return err
+	}
+
+	if d.PatchIsCurrent() {
+		return nil
+	}
+
+	return errors.New("patched bootrom did not start running")
 }
 
 /* This is the main function that does the whole flash procedure */
-func (d *JMSHal) FlashInstallPatchAndBootFW(bootrom []byte, fw []byte) error {
-	code, nvram, isRam, err := image.Extract(fw)
+func (d *JMSHal) FlashPatchWriteAndBootFW(bootrom []byte, fw []byte, addHooks bool, mods []jmsmods.Mod, bootIt bool) error {
+	fw, err := jmsmods.PatchCreate(fw, addHooks, mods)
 	if err != nil {
 		return err
 	}
-
-	if isRam {
-		return errors.New("cannot write ram image")
-	}
-
-	code, err = patchInstall(code, 0x4000, hooks)
-	if err != nil {
-		return err
-	}
-
-	if false {
-		//TODO: Make this mod sha256 dependent!!!
-		//Do not do any writing since this flash does not properly erase
-		code[0x5dfb-0x4000] = 0x22
-	} else {
-		//TODO: Alternative option to put the correct flash commands (0x5fc9)
-		copy(code[0x5f03-0x4000:], []byte{0x2, 0x5f, 0xc9})
-	}
-
-	fw = image.Build(code, nvram, isRam)
 
 	if bootrom != nil {
-		if err := d.GoPatched(bootrom); err != nil {
+		if err := d.RebootToPatched(bootrom); err != nil {
 			return err
 		}
 	}
@@ -174,7 +175,11 @@ func (d *JMSHal) FlashInstallPatchAndBootFW(bootrom []byte, fw []byte) error {
 		return err
 	}
 
-	if bytes.Equal(fw, currentFw) {
+	if len(fw) > len(currentFw) {
+		return errors.New("file is too large")
+	}
+
+	if bytes.Equal(fw, currentFw[:len(fw)]) {
 		if version, err := d.VersionGet(); err != nil {
 			return err
 		} else if version == 0 {
@@ -185,6 +190,10 @@ func (d *JMSHal) FlashInstallPatchAndBootFW(bootrom []byte, fw []byte) error {
 
 	if err := d.FlashWriteFirmware(fw, true); err != nil {
 		return err
+	}
+
+	if !bootIt {
+		return nil
 	}
 
 	return d.ResetChip()

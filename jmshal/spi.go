@@ -2,6 +2,7 @@ package jmshal
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 )
 
@@ -97,7 +98,7 @@ func (d *JMSHal) spiDMARx(out []byte, in []byte) error {
 	return err
 }
 
-func (d *JMSHal) SPI(out []byte, in []byte) error {
+func (d *JMSHal) spi(out []byte, in []byte) error {
 	/* Check which SPI implementation can do this */
 	if err := d.spiDMATx(out, in); err == nil {
 		return nil
@@ -108,10 +109,29 @@ func (d *JMSHal) SPI(out []byte, in []byte) error {
 	return d.spiPIO(out, in)
 }
 
+func (d *JMSHal) SPI(out []byte, in []byte) error {
+	err := d.spi(out, in)
+	if err == nil {
+		d.log("SPI access: %s -> %s", hex.EncodeToString(out), hex.EncodeToString(in))
+	} else {
+		d.log("SPI access: %s -> error=%s", hex.EncodeToString(out), err.Error())
+	}
+	return err
+}
+
 func (d *JMSHal) SPIMaxTransactionSize() int {
-	if d.PatchIsPresent() {
+	if d.spiDMAInstalled() {
 		return 512
 	}
 
 	return 16
+}
+
+func (d *JMSHal) spiInit() error {
+	if _, err := d.CodeCall(0x2c32, CPUContext{}); err != nil {
+		return err
+	}
+
+	/* This field sets the max transfer size in DMA mode (8+4*n bytes), a value of 0 seems to disable the limit. */
+	return d.XDATAWriteByte(0x716d, 0)
 }
