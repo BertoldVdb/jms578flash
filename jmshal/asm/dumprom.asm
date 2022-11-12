@@ -28,7 +28,7 @@
     MOV  R7, A
     MOV  R6, A
 
-    ; to 0x800
+    ; to 0x8000
     MOV  R5, A
     MOV  R4, #0x80
 
