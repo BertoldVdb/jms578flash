@@ -159,7 +159,10 @@ func (d *JMSHal) RebootToPatched(bootrom []byte) error {
 
 /* This is the main function that does the whole flash procedure */
 func (d *JMSHal) FlashPatchWriteAndBootFW(bootrom []byte, fw []byte, addHooks bool, mods []jmsmods.Mod, bootIt bool) error {
-	fw, err := jmsmods.PatchCreate(fw, addHooks, mods)
+	if addHooks {
+		mods = append(mods, jmsmods.ModAddHooks)
+	}
+	fw, err := jmsmods.PatchCreate(fw, mods)
 	if err != nil {
 		return err
 	}

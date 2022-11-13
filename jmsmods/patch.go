@@ -9,19 +9,54 @@ import (
 	_ "embed"
 )
 
-func patchFindJumpTable(code []byte) (uint16, error) {
+type jumptableEntry struct {
+	Type        uint8
+	AddrEntry   uint16
+	AddrHandler uint16
+}
+
+/* This will only patch the first jumptable, in the firmwares I have seen this one is always used first, so it should be enough */
+func patchFindJumpTable(code []byte) ([]jumptableEntry, error) {
 	/* Search for DF xx xx E0 xx xx FF 00 00 */
-	eval := func(buf []byte) bool {
+	evalIsTable := func(buf []byte) bool {
 		return len(buf) >= 9 && buf[0] == 0xDF && buf[3] == 0xE0 && buf[6] == 0xFF && buf[7] == 0 && buf[8] == 0
 	}
 
+	/* Search for E0 | 12 xx xx | xx xx 03 */
+	evalIsStart := func(buf []byte) bool {
+		return len(buf) >= 7 && buf[0] == 0xe0 && buf[1] == 0x12 && buf[6] == 0x03
+	}
+
 	for i := range code {
-		if eval(code[i:]) {
-			return uint16(i + 1), nil
+		if evalIsTable(code[i:]) {
+			/* Find start of table */
+
+			for k := i; k >= 0; k-- {
+				if evalIsStart(code[k:]) {
+					k += 4
+
+					/* Read all entries */
+					var result []jumptableEntry
+					for {
+						if addr := binary.BigEndian.Uint16(code[k:]); addr == 0 {
+							break
+						} else {
+							result = append(result, jumptableEntry{
+								Type:        code[k+2],
+								AddrEntry:   uint16(k),
+								AddrHandler: addr,
+							})
+						}
+						k += 3
+					}
+
+					return result, nil
+				}
+			}
 		}
 	}
 
-	return 0, errors.New("SCSI jumptable not found")
+	return nil, errors.New("SCSI jumptable not found")
 }
 
 type HookFunc struct {
@@ -50,12 +85,7 @@ var hooks = []HookFunc{
 
 const HookVersion string = "00.00.05" //This 8-byte string must be updated whenever the definitions change incompatibly
 
-func patchInstall(code []byte, codeOffset uint16, hooks []HookFunc) ([]byte, error) {
-	codeCpy := make([]byte, len(code))
-	copy(codeCpy, code)
-	code = codeCpy
-
-	/* Find lowest free address */
+func patchFindLoadAddress(code []byte) uint16 {
 	patchLoadAddr := uint16(len(code) - 0x1a)
 	for i := len(code) - 0x20; i >= 0; i-- {
 		if code[i] != 0 && code[i] != 0xFF {
@@ -64,7 +94,16 @@ func patchInstall(code []byte, codeOffset uint16, hooks []HookFunc) ([]byte, err
 
 		patchLoadAddr = uint16(i)
 	}
-	patchLoadAddr += 0x20
+	return patchLoadAddr + 0x20
+}
+
+func patchInstall(code []byte, codeOffset uint16, hooks []HookFunc) ([]byte, error) {
+	codeCpy := make([]byte, len(code))
+	copy(codeCpy, code)
+	code = codeCpy
+
+	/* Find free address */
+	patchLoadAddr := patchFindLoadAddress(code)
 
 	patchInfoTable := make([]byte, 8, 128)
 	copy(patchInfoTable, []byte(HookVersion))
@@ -94,7 +133,7 @@ func patchInstall(code []byte, codeOffset uint16, hooks []HookFunc) ([]byte, err
 	patchInfoTableAddr := codeOffset + patchLoadAddr
 	patchLoadAddr += uint16(len(patchInfoTable))
 
-	patchJumpAddr, err := patchFindJumpTable(code)
+	patchJumpTable, err := patchFindJumpTable(code)
 	if err != nil {
 		return nil, err
 	}
@@ -109,6 +148,17 @@ func patchInstall(code []byte, codeOffset uint16, hooks []HookFunc) ([]byte, err
 		} else if m == 0xBB {
 			hook[i] = byte(patchInfoTableAddr)
 		}
+	}
+
+	var patchJumpAddr uint16
+	for _, k := range patchJumpTable {
+		if k.Type == 0xe0 {
+			patchJumpAddr = k.AddrEntry
+			break
+		}
+	}
+	if patchJumpAddr == 0 {
+		return nil, errors.New("failed to replace SCSI handler 0xe0: not found")
 	}
 
 	/* Replace handler function */

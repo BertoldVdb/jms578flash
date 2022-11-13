@@ -91,6 +91,7 @@ func (s *SCSI) open() error {
 
 func (s *SCSI) Reopen() error {
 	s.Close()
+	time.Sleep(400 * time.Millisecond)
 
 	for i := 0; i < 100; i++ {
 		time.Sleep(100 * time.Millisecond)
