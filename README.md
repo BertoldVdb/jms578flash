@@ -26,7 +26,7 @@ Example command:
 The bootrom argument is optional and will speed up writing to the flash. The written firmware is verified by reading it back from the memory.
 If desired, you can specify one or more mods (comma separated) that will be applied to the firmware image before writing it:
 
- - *FlashNoWrite*: Change the firmware so it will not try to write the flash. It allows you to use almost any flash chip, as long as the read command is 0x02. In addition, you could hardware write protect the flash chip to guard against BadUSB type attacks.
+ - *FlashNoWrite*: Change the firmware so it will not try to write the flash. It allows you to use almost any flash chip, as long as the read command is 0x03. In addition, you could hardware write protect the flash chip to guard against BadUSB type attacks.
  - *FlashSupportAT25DN512*: Add support to the firmware for the Adesto AT25DN512. For a little while, during the 2022 chip shortage, this was the only chip easily available.
  - *ClearNVRAM*: Do not use the NVRAM included in the file.
  - *NoDebug*: Try to disable debug commands. This secures the device from BadUSB attacks. *You will need to open your device if you want to flash it again!* (requires -hook=false)
