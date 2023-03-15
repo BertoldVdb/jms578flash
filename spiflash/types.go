@@ -18,6 +18,7 @@ var devices = []flashDevice{
 	{deviceID: 0xef3012, name: "Winbond W25X20", opcodeChipErase: 0xC7, opcodeBlockErase: 0x20, blockSize: 4096, opcodePageErase: 0xD8, pageSize: 256, chipSize: 256 * 1024},
 	{deviceID: 0x0e4012, name: "Freemont FT25H02", opcodeChipErase: 0xC7, opcodeBlockErase: 0x20, blockSize: 4096, opcodePageErase: 0xD8, pageSize: 256, chipSize: 256 * 1024},
 	{deviceID: 0x0e4013, name: "Freemont FT25H04", opcodeChipErase: 0xC7, opcodeBlockErase: 0x20, blockSize: 4096, opcodePageErase: 0xD8, pageSize: 256, chipSize: 512 * 1024},
+	{deviceID: 0xa13111a1, name: "Fudan Microelectronics FM25F01", opcodeChipErase: 0xC7, opcodeBlockErase: 0x20, blockSize: 4096, opcodePageErase: 0xD8, pageSize: 256, chipSize: 128 * 1024},
 }
 
 func rightAlign(in uint32) (uint32, uint32) {
